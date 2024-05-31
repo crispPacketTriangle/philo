@@ -1,6 +1,6 @@
 #include "philo.h"
 
-// stdbuf -o0 ./philo 5 2 2 2 2 | tee outfile
+// stdbuf -o0 ./philo 5 2 1000 1000 | tee fileout
 
 // pthread_mutex_t	lock;
 // pthread_t 		thrd1;
@@ -78,6 +78,8 @@ int	init_threads(t_data *data, char **argv)
 		if (i % 2 != 0)
 			data->thrds[i]->state = 0;
 		data->thrds[i]->n = data->n_phil;
+		data->thrds[i]->te = data->t_to_eat;
+		data->thrds[i]->ts = data->t_to_sleep;
 		data->thrds[i]->lock = &data->lock;
 		data->thrds[i]->id = i;
 		data->thrds[i]->tb = data->table;
@@ -95,7 +97,10 @@ void	*live(void *pdata)
 	while (1)
 	{
 	t_proc	*p = (t_proc *)pdata;	
-	
+
+	// since i am checking the state of both forks in the following condition
+	// does that mean they are both garunteed to be locked
+	// or do i need to lock check lock
 	pthread_mutex_lock(p->lock);
 	if (p->state == 0 && p->id > 0 && p->tb[p->id - 1] == 0 && p->tb[p->id] == 0)
 	{
@@ -114,6 +119,8 @@ void	*live(void *pdata)
 		eat(p);
 	if (p->state == 1)
 		snooze(p);
+	// if (p->state == 2)
+	// 	think(p);
 	}
 	return (0);
 }
@@ -121,7 +128,7 @@ void	*live(void *pdata)
 int	eat(t_proc *pdata)
 {
 	t_proc	*p = (t_proc *)pdata;
-	sleep(1);
+	usleep(p->te);
 	pthread_mutex_lock(p->lock);
 	printf("%lld :", time_ml());
 	printf("hi from process %d, forks: %d\n", p->id, p->tb[p->id]);
@@ -145,11 +152,16 @@ int	snooze(t_proc *pdata)
 {
 	t_proc	*p = (t_proc *)pdata;
 	p->state = 0;
-	sleep(1);
+	usleep(p->ts);
 	return (0);
-
 }
 
+// int	think(t_proc *pdata)
+// {
+// 	t_proc	*p = (t_proc *)pdata;
+// 	p->state = 0;
+// 	return (0);
+// }
 
 
 // a way to track if a thread has eaten or not
@@ -163,37 +175,4 @@ int	snooze(t_proc *pdata)
 //
 
 
-// int	message1(t_data *data)
-// {
-// 	pthread_mutex_lock(&lock);
-// 	while (data->n < 10000000000) 
-// 		data->n++;
-// 	printf("message1: %s\n", data->message1);
-// 	if (data->n >= 1000000000)
-// 		pthread_mutex_unlock(&lock);
-// 	return (0);
-// }
-//
-// int	message2(t_data *data)
-//
-// {
-// 	pthread_mutex_lock(&lock);
-// 	while (data->n < 10000000000)
-// 		data->n++;
-// 	printf("message2: %s\n", data->message2);
-// 	if (data->n >= 1000000000)
-// 		pthread_mutex_unlock(&lock);
-// 	return (0);
-// }
-//
-// void	*thread1(void *args)
-// {
-// 	message1(args);
-// 	return (0);
-// }
-//
-// void	*thread2(void *args)
-// {
-// 	message2(args);
-// 	return (0);
-// }
+

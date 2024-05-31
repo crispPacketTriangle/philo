@@ -35,6 +35,8 @@ typedef struct t_time
 typedef struct t_proc
 {
 	int				n;
+	int				te;
+	int				ts;
 	int				id;
 	int				state;
 	int				forks;
@@ -60,6 +62,7 @@ int			ph_atoi(const char *nptr);
 void		*live(void *data);
 int			eat(t_proc *pdata);
 int			snooze(t_proc *pdata);
+int			think(t_proc *pdata);
 int			init_vars(t_data *data, char **argv);
 int			set_table(t_data *data);
 int			init_threads(t_data *data, char **argv);
