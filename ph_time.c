@@ -23,7 +23,6 @@ void	cal_year(t_data *data)
 	
 	gettimeofday(&tv, NULL);
 	data->t.sec = tv.tv_sec;
-	suseconds_t micro_sec = tv.tv_usec;
 	data->t.year = 1970;
 	data->t.days = (data->t.sec / SEC_IN_DAY) + 1;
 	while (1)

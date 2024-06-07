@@ -1,6 +1,7 @@
 #include "philo.h"
 
-// stdbuf -o0 ./philo 5 2 1000 1000 | tee fileout
+// stdbuf -o0 ./philo 5 1000 1000 1000 | tee fileout
+// valgrind --tool=helgrind -s ./philo 4 310 200 100 | tee fileout 
 
 // pthread_mutex_t	lock;
 // pthread_t 		thrd1;
@@ -16,6 +17,8 @@
 // timestamp_in_ms X is thinking
 // timestamp_in_ms X died
 
+
+// check inputs as valid, n inputs, no chars, etc
 
 int	main(int argc, char **argv)
 {
@@ -36,16 +39,19 @@ int	main(int argc, char **argv)
         printf("Mutex init failed\n");
         return (1);
 	}
-	//pthread_detach(thrd2);
-	
+	init_locks(&data);	
 	init_threads(&data, argv);
-
+	
+	int ofs = 1000;
 	i = 0;
 	while (i < data.n_phil)
 	{
+		usleep(ofs);
 		pthread_join(data.thrds[i]->thr, NULL);
 		i++;
+		ofs += 1500;
 	}
+	// need another thread to check if any threads have died
 }
 
 int	init_vars(t_data *data, char **argv)
@@ -63,7 +69,7 @@ int	init_threads(t_data *data, char **argv)
 {
 	int	i;
 
-	data->thrds = malloc ((data->n_phil + 1) * sizeof(t_proc *));
+	data->thrds = malloc ((data->n_phil) * sizeof(t_proc *));
 	i = 0;
 	while (i < data->n_phil)
 	{
@@ -73,106 +79,139 @@ int	init_threads(t_data *data, char **argv)
 	i = 0;
 	while (i < data->n_phil)
 	{
-		if (i % 2 == 0)
-			data->thrds[i]->state = 0;
-		if (i % 2 != 0)
-			data->thrds[i]->state = 0;
+		// if (i % 2 == 0)
+		// 	data->thrds[i]->state = 1;
+		// if (i % 2 != 0)
+		data->thrds[i]->state = 1;
+		data->thrds[i]->forks = 0;
 		data->thrds[i]->n = data->n_phil;
 		data->thrds[i]->te = data->t_to_eat;
 		data->thrds[i]->ts = data->t_to_sleep;
+		data->thrds[i]->td = data->t_to_die;
+		data->thrds[i]->bkof = 1;
+		data->thrds[i]->lst_ate = time_ml();
 		data->thrds[i]->lock = &data->lock;
+		data->thrds[i]->locks = data->locks;
 		data->thrds[i]->id = i;
 		data->thrds[i]->tb = data->table;
+		data->thrds[i]->lst_wrds = 0;
 		pthread_create(&(data->thrds[i]->thr), NULL, &live, data->thrds[i]);
 		i++;
 	}
-	data->thrds[i] = NULL;
 	return (0);
 }
 
 void	*live(void *pdata)
 {
-	// here should be a continuous loop of eat,
-	// sleep, think
+	t_proc	*p = (t_proc *)pdata;	
 	while (1)
 	{
-	t_proc	*p = (t_proc *)pdata;	
 
-	// since i am checking the state of both forks in the following condition
-	// does that mean they are both garunteed to be locked
-	// or do i need to lock check lock
-	pthread_mutex_lock(p->lock);
-	if (p->state == 0 && p->id > 0 && p->tb[p->id - 1] == 0 && p->tb[p->id] == 0)
+	// top condition should be after first fork grab
+	if (p->n > 1)
 	{
-		p->tb[p->id] = 1;
-		p->tb[p->id - 1] = 1;
-		p->forks = 1;
-	}
-	if (p->state == 0 && p->id == 0 && p->tb[p->n - 1] == 0 && p->tb[p->id] == 0)
-	{
-		p->tb[p->id] = 1;
-		p->tb[p->n - 1] = 1;
-		p->forks = 1;
-	}
-	pthread_mutex_unlock(p->lock);
-	if (p->forks)
-		eat(p);
-	if (p->state == 1)
-		snooze(p);
-	// if (p->state == 2)
-	// 	think(p);
+			dead(p);
+			if (p->state == 0 && (p->forks == 0 || p->forks == 1))
+			{
+				if (p->id > 0)
+				{
+					pthread_mutex_lock(&(p->locks[p->id - 1]));
+					if (p->tb[p->id - 1] == -1)
+					{
+						p->tb[p->id - 1] = 1;
+						p->forks += 2;
+					}
+					pthread_mutex_unlock(&(p->locks[p->id - 1]));
+				}
+				if (p->id == 0)
+				{
+					pthread_mutex_lock(&(p->locks[p->n - 1]));
+					if (p->state == 0 && p->tb[p->n - 1] == -1)
+					{
+						p->tb[p->n - 1] = 1;
+						p->forks += 2;
+					}
+					pthread_mutex_unlock(&(p->locks[p->n - 1]));
+				}
+			}
+			dead(p);
+			if (p->state == 0 && (p->forks == 0 || p->forks == 2))
+			{
+				pthread_mutex_lock(&(p->locks[p->id]));
+				if (p->tb[p->id] == -1)
+				{
+					p->tb[p->id] = 1;
+					p->forks++;
+				}	
+				pthread_mutex_unlock(&(p->locks[p->id]));
+			}
+		}
+
+////////////////////////////////////////////////////////
+
+		dead(p);
+		if (p->forks == 3 && p->state != 2)
+			eat(p);
+		if (p->state == 1)
+			snooze(p);
+		if (p->state == 2)
+		{
+			release(p);
+			pthread_mutex_lock(&(p->locks[p->id]));
+			printf("%d died (last meal %lld ms ago)\n", p->id, time_ml() - p->lst_ate);
+			pthread_mutex_unlock(&(p->locks[p->id]));
+			return(NULL);
+		}
+		//backoff(p);
 	}
 	return (0);
 }
 
-int	eat(t_proc *pdata)
+int	eat(t_proc *p)
 {
-	t_proc	*p = (t_proc *)pdata;
-	usleep(p->te);
-	pthread_mutex_lock(p->lock);
-	printf("%lld :", time_ml());
-	printf("hi from process %d, forks: %d\n", p->id, p->tb[p->id]);
+	//printf("%d - %lld\n", p->id, time_ml() - p->lst_ate);
+	p->lst_ate = time_ml();
+	usleep(p->te * 1000);
+	pthread_mutex_lock(&(p->locks[p->id]));
+	printf("%d: %lld\n", p->id, time_ml());
+	pthread_mutex_unlock(&(p->locks[p->id]));
 	if (p->id == 0)
 	{
-		p->tb[p->id] = 0;
-		p->tb[p->n - 1] = 0;
+		pthread_mutex_lock(&(p->locks[p->id]));
+		p->tb[p->id] = -1;
+		pthread_mutex_unlock(&(p->locks[p->id]));
+		pthread_mutex_lock(&(p->locks[p->n - 1]));
+		p->tb[p->n - 1] = -1;
+		pthread_mutex_unlock(&(p->locks[p->n - 1]));
 	}
 	else
 	{
-		p->tb[p->id] = 0;
-		p->tb[p->id - 1] = 0;
+		pthread_mutex_lock(&(p->locks[p->id]));
+		p->tb[p->id] = -1;
+		pthread_mutex_unlock(&(p->locks[p->id]));
+		pthread_mutex_lock(&(p->locks[p->id - 1]));
+		p->tb[p->id - 1] = -1;
+		pthread_mutex_unlock(&(p->locks[p->id - 1]));
 	}
-	pthread_mutex_unlock(p->lock);
 	p->forks = 0;
 	p->state = 1;
 	return (0);
 }	
 
-int	snooze(t_proc *pdata)
+int	snooze(t_proc *p)
 {
-	t_proc	*p = (t_proc *)pdata;
 	p->state = 0;
-	usleep(p->ts);
+	usleep(p->ts * 1000);
 	return (0);
 }
 
-// int	think(t_proc *pdata)
-// {
-// 	t_proc	*p = (t_proc *)pdata;
-// 	p->state = 0;
-// 	return (0);
-// }
-
-
-// a way to track if a thread has eaten or not
-// 0 = hungry
-// 1 = tired
-// 2 = alert
-//
-// if 0 eat
-// if 1 sleep
-// if 2 think
-//
-
-
+int	dead(t_proc *p)
+{
+	if (time_ml() - p->lst_ate >= p->td)
+	{
+		p->state = 2;
+		return (1);
+	}
+	return (0);
+}
 
